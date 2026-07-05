@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Min IMDb Top 250 (Molnsynkad)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen font-sans">
+
+    <div id="app" class="max-w-4xl mx-auto px-4 py-8">
+        
+        <div v-if="!user" class="max-w-md mx-auto mt-20 bg-gray-800 p-8 rounded-2xl border border-gray-700 shadow-xl">
+            <h2 class="text-2xl font-bold text-yellow-500 mb-6 text-center">🎬 Logga in till din IMDb-lista</h2>
+            <p class="text-sm text-gray-400 mb-6 text-center">Ange din e-post så skickas en direktlänk (Magic Link) till din inkorg för att logga in på vilken enhet som helst.</p>
+            
+            <form @submit.prevent="handleLogin">
+                <div class="mb-4">
+                    <label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-2">E-postadress</label>
+                    <input type="email" v-model="email" required placeholder="namn@exempel.com" class="w-full bg-gray-700 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-500">
+                </div>
+                <button type="submit" :disabled="loading" class="w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold py-3 rounded-xl transition duration-200 disabled:opacity-50">
+                    {{ loading ? 'Skickar länk...' : 'Skicka inloggningslänk' }}
+                </button>
+            </form>
+            <p v-if="message" class="mt-4 text-center text-sm text-emerald-400 font-medium">{{ message }}</p>
+        </div>
+
+        <div v-else>
+            <header class="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-800 pb-6">
+                <div>
+                    <h1 class="text-3xl font-bold text-yellow-500 mb-1">🎬 Min IMDb Top Lista</h1>
+                    <p class="text-sm text-gray-400">Inloggad som: <span class="text-gray-200 font-medium">{{ user.email }}</span></p>
+                </div>
+                <button @click="handleLogout" class="bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white px-4 py-2 rounded-xl text-sm border border-gray-700 transition">
+                    Logga ut
+                </button>
+            </header>
+
+            <div class="mb-8 bg-gray-800 p-4 rounded-xl border border-gray-700">
+                <div class="flex justify-between text-sm font-bold mb-2">
+                    <span>Din Framgång</span>
+                    <span class="text-yellow-500">{{ watchedCount }} av {{ movies.length }} sedda ({{ progressPercent }}%)</span>
+                </div>
+                <div class="bg-gray-700 rounded-full h-4 w-full overflow-hidden border border-gray-600">
+                    <div class="bg-gradient-to-r from-yellow-500 to-amber-500 h-full transition-all duration-500" :style="{ width: progressPercent + '%' }"></div>
+                </div>
+            </div>
+
+            <div class="bg-gray-800 p-4 rounded-xl mb-6 flex flex-col md:flex-row gap-4 border border-gray-700">
+                <input type="text" v-model="searchQuery" placeholder="Sök på titel..." class="bg-gray-700 text-white px-4 py-2 rounded-lg flex-grow focus:outline-none focus:ring-2 focus:ring-yellow-500">
+                
+                <select v-model="selectedGenre" class="bg-gray-700 text-white px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500">
+                    <option value="">Alla genrer</option>
+                    <option v-for="genre in genres" :key="genre" :value="genre">{{ genre }}</option>
+                </select>
+            </div>
+
+            <div class="space-y-2">
+                <div v-for="movie in filteredMovies" :key="movie.rank" 
+                     class="flex items-center justify-between p-4 rounded-xl border transition-all duration-150 cursor-pointer select-none"
+                     :class="watchedMovies.includes(movie.rank) ? 'bg-emerald-950/20 border-emerald-500/40 hover:bg-emerald-950/30' : 'bg-gray-800 border-gray-700/60 hover:bg-gray-750'"
+                     @click="toggleWatched(movie.rank)">
+                    
+                    <div class="flex items-center gap-4">
+                        <span class="text-xl font-mono font-bold text-gray-500 w-8 text-right">#{{ movie.rank }}</span>
+                        <div>
+                            <h3 class="font-bold text-lg transition-all" :class="{ 'line-through text-gray-500': watchedMovies.includes(movie.rank) }">
+                                {{ movie.title }}
+                            </h3>
+                            <p class="text-xs text-gray-400 mt-0.5">
+                                <span>📅 {{ movie.year }}</span>
+                                <span class="mx-2">•</span>
+                                <span>🎭 {{ movie.genre }}</span>
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-4" @click.stop>
+                        <div class="flex items-center gap-1 text-yellow-500 font-bold">
+                            <span>⭐</span>
+                            <span>{{ movie.rating }}</span>
+                        </div>
+                        <input type="checkbox" :checked="watchedMovies.includes(movie.rank)" @change="toggleWatched(movie.rank)" class="w-6 h-6 rounded border-gray-600 text-emerald-500 focus:ring-emerald-500 bg-gray-700 cursor-pointer">
+                    </div>
+                </div>
+
+                <div v-if="filteredMovies.length === 0" class="text-center py-8 text-gray-500">
+                    Inga filmer matchar din sökning.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                // Ange dina Supabase-uppgifter här:
+                const SUPABASE_URL = "DITT_SUPABASE_URL"; 
+                const SUPABASE_KEY = "DIN_SUPABASE_ANON_KEY"; 
+                
+                const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+                // Datalista (Här finns toppfilmerna inlagda för en stabil grund)
+                const movies = ref([
+                    { rank: 1, title: "The Shawshank Redemption", year: 1994, genre: "Drama", rating: 9.3 },
+                    { rank: 2, title: "The Godfather", year: 1972, genre: "Crime", rating: 9.2 },
+                    { rank: 3, title: "The Dark Knight", year: 2008, genre: "Action", rating: 9.1 },
+                    { rank: 4, title: "The Godfather: Part II", year: 1974, genre: "Crime", rating: 9.0 },
+                    { rank: 5, title: "12 Angry Men", year: 1957, genre: "Drama", rating: 9.0 },
+                    { rank: 6, title: "The Lord of the Rings: The Return of the King", year: 2003, genre: "Action", rating: 9.0 },
+                    { rank: 7, title: "Schindler's List", year: 1993, genre: "Biography", rating: 9.0 },
+                    { rank: 8, title: "Pulp Fiction", year: 1994, genre: "Crime", rating: 8.8 },
+                    { rank: 9, title: "The Good, the Bad and the Ugly", year: 1966, genre: "Western", rating: 8.8 },
+                    { rank: 10, title: "Inception", year: 2010, genre: "Action", rating: 8.8 },
+                    { rank: 11, title: "Fight Club", year: 1999, genre: "Drama", rating: 8.8 },
+                    { rank: 12, title: "Forrest Gump", year: 1994, genre: "Drama", rating: 8.8 },
+                    { rank: 13, title: "Interstellar", year: 2014, genre: "Sci-Fi", rating: 8.7 },
+                    { rank: 14, title: "The Matrix", year: 1999, genre: "Action", rating: 8.7 },
+                    { rank: 15, title: "Goodfellas", year: 1990, genre: "Biography", rating: 8.7 },
+                    { rank: 16, title: "Se7en", year: 1995, genre: "Crime", rating: 8.6 },
+                    { rank: 17, title: "Spirited Away", year: 2001, genre: "Animation", rating: 8.6 },
+                    { rank: 18, title: "Gladiator", year: 2000, genre: "Action", rating: 8.5 },
+                    { rank: 19, title: "Parasite", year: 2019, genre: "Drama", rating: 8.5 },
+                    { rank: 20, title: "Whiplash", year: 2014, genre: "Drama", rating: 8.5 }
+                ]);
+
+                const user = ref(null);
+                const email = ref('');
+                const loading = ref(false);
+                const message = ref('');
+                const searchQuery = ref('');
+                const selectedGenre = ref('');
+                const watchedMovies = ref([]);
+
+                // Kontrollera om användaren redan är inloggad vid start
+                onMounted(async () => {
+                    const { data } = await supabase.auth.getSession();
+                    if (data?.session) {
+                        user.value = data.session.user;
+                        await fetchUserProgress();
+                    }
+
+                    // Lyssna på förändringar i autentisering (om man klickar på Magic Link)
+                    supabase.auth.onAuthStateChange(async (event, session) => {
+                        if (session) {
+                            user.value = session.user;
+                            await fetchUserProgress();
+                        } else {
+                            user.value = null;
+                            watchedMovies.value = [];
+                        }
+                    });
+                });
+
+                // Hämta sedda filmer från Supabase
+                const fetchUserProgress = async () => {
+                    if (!user.value) return;
+                    const { data, error } = await supabase
+                        .from('user_progress')
+                        .select('watched_movies')
+                        .eq('user_id', user.value.id)
+                        .single();
+
+                    if (data) {
+                        watchedMovies.value = data.watched_movies || [];
+                    }
+                };
+
+                // Logga in med Magic Link
+                const handleLogin = async () => {
+                    loading.value = true;
+                    message.value = '';
+                    const { error } = await supabase.auth.signInWithOtp({
+                        email: email.value,
+                        options: {
+                            emailRedirectTo: window.location.href // Skickar tillbaka användaren till samma sida
+                        }
+                    });
+                    loading.value = false;
+                    if (error) {
+                        message.value = "Fel: " + error.message;
+                    } else {
+                        message.value = "En inloggningslänk har skickats till din e-post!";
+                    }
+                };
+
+                const handleLogout = async () => {
+                    await supabase.auth.signOut();
+                };
+
+                // Spara framsteg i molnet vid klick
+                const toggleWatched = async (rank) => {
+                    if (!user.value) return;
+                    
+                    if (watchedMovies.value.includes(rank)) {
+                        watchedMovies.value = watchedMovies.value.filter(r => r !== rank);
+                    } else {
+                        watchedMovies.value.push(rank);
+                    }
+
+                    // Spara (Upsert) direkt till Supabase
+                    await supabase
+                        .from('user_progress')
+                        .upsert({ 
+                            user_id: user.value.id, 
+                            watched_movies: watchedMovies.value 
+                        });
+                };
+
+                // Filtrering & Genrer
+                const genres = computed(() => {
+                    return [...new Set(movies.value.map(m => m.genre))].sort();
+                });
+
+                const filteredMovies = computed(() => {
+                    return movies.value.filter(movie => {
+                        const matchesSearch = movie.title.toLowerCase().includes(searchQuery.value.toLowerCase());
+                        const matchesGenre = selectedGenre.value === '' || movie.genre === selectedGenre.value;
+                        return matchesSearch && matchesGenre;
+                    });
+                });
+
+                const watchedCount = computed(() => watchedMovies.value.length);
+                const progressPercent = computed(() => {
+                    return movies.value.length ? Math.round((watchedCount.value / movies.value.length) * 100) : 0;
+                });
+
+                return {
+                    user, email, loading, message, movies, searchQuery, selectedGenre,
+                    genres, watchedMovies, filteredMovies, watchedCount, progressPercent,
+                    handleLogin, handleLogout, toggleWatched
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
