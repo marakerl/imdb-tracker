@@ -103,8 +103,8 @@
                 const SUPABASE_URL = "https://agbyjmbfhdcnkrslxmqt.supabase.co"; 
                 const SUPABASE_KEY = "sb_publishable_DfLU3t6tKztfZAUChdWvdA_P-TF_wdl"; 
                 
-                const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
+                const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                
                 // Datalista (Här finns toppfilmerna inlagda för en stabil grund)
                 const movies = ref([
                     { rank: 1, title: "The Shawshank Redemption", year: 1994, genre: "Drama", rating: 9.3 },
